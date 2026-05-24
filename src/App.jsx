@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
+import { VoiceProvider, useVoice, speechSupported, recognitionSupported } from './voice.jsx'
 
 const MODEL = 'claude-sonnet-4-20250514'
 const API_URL = 'https://api.anthropic.com/v1/messages'
@@ -105,6 +106,13 @@ function Icon({ name, size = 18 }) {
     menu: <><line x1="4" x2="20" y1="12" y2="12"/><line x1="4" x2="20" y1="6" y2="6"/><line x1="4" x2="20" y1="18" y2="18"/></>,
     close: <><path d="M18 6 6 18M6 6l12 12"/></>,
     globe: <><circle cx="12" cy="12" r="10"/><path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20"/><path d="M2 12h20"/></>,
+    play: <><polygon points="6 3 20 12 6 21 6 3"/></>,
+    stop: <><rect x="5" y="5" width="14" height="14" rx="1"/></>,
+    mic: <><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" x2="12" y1="19" y2="22"/></>,
+    micOff: <><line x1="2" x2="22" y1="2" y2="22"/><path d="M18.89 13.23A7.12 7.12 0 0 0 19 12v-2"/><path d="M5 10v2a7 7 0 0 0 12 5"/><path d="M15 9.34V5a3 3 0 0 0-5.68-1.33"/><path d="M9 9v3a3 3 0 0 0 5.12 2.12"/><line x1="12" x2="12" y1="19" y2="22"/></>,
+    speaker: <><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14"/></>,
+    speakerOff: <><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><line x1="22" x2="16" y1="9" y2="15"/><line x1="16" x2="22" y1="9" y2="15"/></>,
+    settings: <><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/><circle cx="12" cy="12" r="3"/></>,
   }
   return (
     <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -133,6 +141,7 @@ function Sidebar({ activeTab, setActiveTab, onResetKey, mobileOpen, setMobileOpe
     { id: 'market', label: 'Market Watch', icon: 'market' },
     { id: 'news', label: 'News Feed', icon: 'news' },
     { id: 'reminders', label: 'Reminders', icon: 'reminders' },
+    { id: 'voice', label: 'Voice Settings', icon: 'settings' },
   ]
   return (
     <>
@@ -365,6 +374,7 @@ function DailyBriefing({ apiKey }) {
   const [loading, setLoading] = useState({ headlines: false, stocks: false, crypto: false })
   const [error, setError] = useState(null)
   const [lastRefresh, setLastRefresh] = useState(null)
+  const { speakChunks, stopSpeaking, isSpeaking, speechSupported: ttsOk } = useVoice()
 
   useEffect(() => {
     const t = setInterval(() => setNow(new Date()), 1000)
@@ -456,6 +466,55 @@ Change is the 24h % change as a number.`,
 
   const anyLoading = loading.headlines || loading.stocks || loading.crypto
 
+  const playBriefing = () => {
+    if (isSpeaking) { stopSpeaking(); return }
+    const chunks = []
+    const dateStr = now.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' })
+    chunks.push(`${greeting}. Here is your briefing for ${dateStr}.`)
+
+    if (headlines && headlines.length) {
+      chunks.push('Top headlines.')
+      headlines.slice(0, 5).forEach((h, i) => {
+        chunks.push(`${i + 1}. ${h.headline}. ${h.summary || ''}`)
+      })
+    }
+
+    const summarize = (arr, label) => {
+      if (!arr || !arr.length) return null
+      const parts = arr.map((s) => {
+        const ch = Number(s.change)
+        const dir = isNaN(ch) ? 'unchanged' : ch > 0 ? 'up' : ch < 0 ? 'down' : 'flat'
+        const pct = isNaN(ch) ? '' : ` ${Math.abs(ch).toFixed(2)} percent`
+        return `${s.name} ${dir}${pct}`
+      })
+      return `${label}: ${parts.join('. ')}.`
+    }
+
+    if (stocks) {
+      const us = summarize(stocks.us, 'U.S. markets')
+      const eu = summarize(stocks.europe, 'European markets')
+      const as = summarize(stocks.asia, 'Asian markets')
+      if (us) chunks.push(us)
+      if (eu) chunks.push(eu)
+      if (as) chunks.push(as)
+    }
+
+    if (crypto && crypto.length) {
+      const parts = crypto.map((c) => {
+        const ch = Number(c.change)
+        const dir = isNaN(ch) ? 'unchanged' : ch > 0 ? 'up' : ch < 0 ? 'down' : 'flat'
+        const pct = isNaN(ch) ? '' : ` ${Math.abs(ch).toFixed(2)} percent`
+        return `${c.name || c.symbol} at ${c.price ? '$' + c.price : 'unknown'}, ${dir}${pct}`
+      })
+      chunks.push(`Crypto. ${parts.join('. ')}.`)
+    }
+
+    chunks.push(`That is your briefing.`)
+    speakChunks(chunks, { pauseMs: 500 })
+  }
+
+  const canPlay = ttsOk && !anyLoading && (headlines || stocks || crypto)
+
   return (
     <div style={{ maxWidth: 1280, margin: '0 auto' }}>
       <ErrorBanner error={error} onClose={() => setError(null)} />
@@ -485,6 +544,26 @@ Change is the 24h % change as a number.`,
               </div>
             )}
           </div>
+          {ttsOk && (
+            <button
+              onClick={playBriefing}
+              disabled={!canPlay && !isSpeaking}
+              style={{
+                padding: '10px 14px',
+                background: isSpeaking ? 'var(--red-bg)' : 'linear-gradient(135deg, var(--accent), #0099cc)',
+                color: isSpeaking ? 'var(--red)' : '#000',
+                border: isSpeaking ? '1px solid var(--red)' : 'none',
+                borderRadius: 8, fontWeight: 600, fontSize: 12,
+                display: 'flex', alignItems: 'center', gap: 8,
+                opacity: (!canPlay && !isSpeaking) ? 0.5 : 1,
+                transition: 'all 0.15s ease',
+              }}
+              title={isSpeaking ? 'Stop playback' : 'Play briefing aloud'}
+            >
+              <Icon name={isSpeaking ? 'stop' : 'play'} size={12} />
+              {isSpeaking ? 'Stop' : 'Play Briefing'}
+            </button>
+          )}
           <button
             onClick={fetchAll}
             disabled={anyLoading}
@@ -574,21 +653,34 @@ Change is the 24h % change as a number.`,
   )
 }
 
-function ChatAssistant({ apiKey }) {
+function ChatAssistant({ apiKey, wakePending, onWakeHandled }) {
   const [messages, setMessages] = useState([])
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState(null)
   const scrollRef = useRef(null)
   const inputRef = useRef(null)
+  const loadingRef = useRef(false)
+  const {
+    settings: voiceSettings, setSettings: setVoiceSettings,
+    speak, stopSpeaking, isSpeaking,
+    isListening, transcript, startListening, stopListening,
+    speechSupported: ttsOk, recognitionSupported: sttOk,
+  } = useVoice()
 
   useEffect(() => {
     if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight
   }, [messages, loading])
 
-  const send = async () => {
-    const text = input.trim()
-    if (!text || loading) return
+  useEffect(() => { loadingRef.current = loading }, [loading])
+
+  useEffect(() => {
+    if (isListening && transcript) setInput(transcript)
+  }, [isListening, transcript])
+
+  const send = async (overrideText) => {
+    const text = (overrideText ?? input).trim()
+    if (!text || loadingRef.current) return
     setInput('')
     setError(null)
     const newMessages = [...messages, { role: 'user', content: text }]
@@ -600,6 +692,7 @@ function ChatAssistant({ apiKey }) {
       const reply = extractText(res)
       const citations = extractCitations(res)
       setMessages([...newMessages, { role: 'assistant', content: reply, citations }])
+      if (voiceSettings.autoRead && reply) speak(reply)
     } catch (e) {
       setError(e.message)
       setMessages(newMessages)
@@ -608,6 +701,56 @@ function ChatAssistant({ apiKey }) {
       setTimeout(() => inputRef.current?.focus(), 50)
     }
   }
+
+  const beginListening = () => {
+    stopSpeaking()
+    startListening((finalText) => {
+      if (finalText) {
+        setInput(finalText)
+        setTimeout(() => send(finalText), 100)
+      }
+    })
+  }
+
+  const endAndSend = () => {
+    const textToSend = (transcript || input).trim()
+    stopListening()
+    if (textToSend) setTimeout(() => send(textToSend), 50)
+  }
+
+  const pressStartRef = useRef(0)
+  const wasListeningOnDownRef = useRef(false)
+
+  const onMicDown = (e) => {
+    e.preventDefault()
+    if (!sttOk || loading) return
+    pressStartRef.current = Date.now()
+    wasListeningOnDownRef.current = isListening
+    if (!isListening) beginListening()
+  }
+
+  const onMicUp = (e) => {
+    e.preventDefault()
+    if (!sttOk) return
+    const duration = Date.now() - pressStartRef.current
+    if (duration > 250 || wasListeningOnDownRef.current) {
+      endAndSend()
+    }
+  }
+
+  useEffect(() => {
+    if (!wakePending) return
+    onWakeHandled?.()
+    if (sttOk && !isListening && !loadingRef.current) {
+      stopSpeaking()
+      startListening((finalText) => {
+        if (finalText) {
+          setInput(finalText)
+          setTimeout(() => send(finalText), 100)
+        }
+      })
+    }
+  }, [wakePending])
 
   const suggestions = [
     'What happened in markets today?',
@@ -621,11 +764,30 @@ function ChatAssistant({ apiKey }) {
       maxWidth: 900, margin: '0 auto',
       height: '100%', display: 'flex', flexDirection: 'column',
     }}>
-      <div style={{ marginBottom: 16 }}>
-        <h1 style={{ fontSize: 22, fontWeight: 700, marginBottom: 4 }}>AI Assistant</h1>
-        <p style={{ color: 'var(--text-secondary)', fontSize: 13 }}>
-          Ask anything about markets, news, or trade ideas. Web search is enabled.
-        </p>
+      <div style={{ marginBottom: 16, display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', gap: 16, flexWrap: 'wrap' }}>
+        <div>
+          <h1 style={{ fontSize: 22, fontWeight: 700, marginBottom: 4 }}>AI Assistant</h1>
+          <p style={{ color: 'var(--text-secondary)', fontSize: 13 }}>
+            Ask anything about markets, news, or trade ideas. Web search is enabled.
+          </p>
+        </div>
+        {ttsOk && (
+          <button
+            onClick={() => setVoiceSettings({ autoRead: !voiceSettings.autoRead })}
+            style={{
+              display: 'flex', alignItems: 'center', gap: 8,
+              padding: '8px 12px', borderRadius: 8, fontSize: 12, fontWeight: 600,
+              background: voiceSettings.autoRead ? 'var(--accent-glow)' : 'var(--bg-card)',
+              border: voiceSettings.autoRead ? '1px solid var(--accent)' : '1px solid var(--border)',
+              color: voiceSettings.autoRead ? 'var(--accent)' : 'var(--text-secondary)',
+              transition: 'all 0.15s ease',
+            }}
+            title="Read assistant replies aloud automatically"
+          >
+            <Icon name={voiceSettings.autoRead ? 'speaker' : 'speakerOff'} size={14} />
+            Auto-read {voiceSettings.autoRead ? 'on' : 'off'}
+          </button>
+        )}
       </div>
 
       <ErrorBanner error={error} onClose={() => setError(null)} />
@@ -707,6 +869,24 @@ function ChatAssistant({ apiKey }) {
                 </div>
               )}
             </div>
+            {m.role === 'assistant' && ttsOk && (
+              <button
+                onClick={() => isSpeaking ? stopSpeaking() : speak(m.content)}
+                style={{
+                  marginTop: 4, padding: '4px 8px',
+                  display: 'flex', alignItems: 'center', gap: 5,
+                  fontSize: 10, color: 'var(--text-muted)',
+                  background: 'transparent', borderRadius: 4,
+                  transition: 'color 0.15s ease',
+                }}
+                onMouseEnter={(e) => e.currentTarget.style.color = 'var(--accent)'}
+                onMouseLeave={(e) => e.currentTarget.style.color = 'var(--text-muted)'}
+                title={isSpeaking ? 'Stop' : 'Read aloud'}
+              >
+                <Icon name={isSpeaking ? 'stop' : 'speaker'} size={11} />
+                {isSpeaking ? 'Stop' : 'Read aloud'}
+              </button>
+            )}
           </div>
         ))}
         {loading && (
@@ -717,16 +897,17 @@ function ChatAssistant({ apiKey }) {
       </div>
 
       <div style={{
-        background: 'var(--bg-card)', border: '1px solid var(--border)',
+        background: 'var(--bg-card)', border: isListening ? '1px solid var(--red)' : '1px solid var(--border)',
         borderRadius: 12, padding: 8,
         display: 'flex', alignItems: 'flex-end', gap: 8,
+        transition: 'border-color 0.15s ease',
       }}>
         <textarea
           ref={inputRef}
           value={input}
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send() } }}
-          placeholder="Ask about markets, news, or trade ideas… (Enter to send)"
+          placeholder={isListening ? 'Listening…' : 'Ask about markets, news, or trade ideas… (Enter to send)'}
           rows={1}
           style={{
             flex: 1, padding: '10px 12px',
@@ -735,8 +916,39 @@ function ChatAssistant({ apiKey }) {
           }}
           onInput={(e) => { e.target.style.height = 'auto'; e.target.style.height = Math.min(e.target.scrollHeight, 120) + 'px' }}
         />
+        {sttOk && (
+          <button
+            onPointerDown={onMicDown}
+            onPointerUp={onMicUp}
+            onPointerLeave={(e) => { if (isListening && Date.now() - pressStartRef.current > 250) onMicUp(e) }}
+            disabled={loading}
+            style={{
+              padding: '10px',
+              background: isListening ? 'var(--red-bg)' : 'var(--bg-hover)',
+              border: isListening ? '1px solid var(--red)' : 'none',
+              color: isListening ? 'var(--red)' : 'var(--text-primary)',
+              borderRadius: 8, display: 'flex', alignItems: 'center', justifyContent: 'center',
+              position: 'relative',
+              opacity: loading ? 0.5 : 1,
+              transition: 'all 0.15s ease',
+              touchAction: 'none',
+              userSelect: 'none',
+            }}
+            title={isListening ? 'Click or release to send' : 'Click to toggle, or hold to record'}
+          >
+            <Icon name={isListening ? 'micOff' : 'mic'} size={16} />
+            {isListening && (
+              <span style={{
+                position: 'absolute', top: 4, right: 4,
+                width: 6, height: 6, borderRadius: '50%',
+                background: 'var(--red)',
+                animation: 'pulse 1s ease-in-out infinite',
+              }} />
+            )}
+          </button>
+        )}
         <button
-          onClick={send}
+          onClick={() => send()}
           disabled={!input.trim() || loading}
           style={{
             padding: '10px 14px',
@@ -1355,11 +1567,227 @@ Order by date ascending. Include 6-12 items.`,
   )
 }
 
-export default function App() {
+function VoiceSettings() {
+  const {
+    settings, setSettings, voices,
+    speak, stopSpeaking, isSpeaking,
+    speechSupported: ttsOk, recognitionSupported: sttOk,
+  } = useVoice()
+
+  const englishVoices = voices.filter((v) => v.lang && v.lang.toLowerCase().startsWith('en'))
+  const otherVoices = voices.filter((v) => !v.lang || !v.lang.toLowerCase().startsWith('en'))
+
+  const testPhrase = "Hello. This is your AI command center. Markets are moving — let me know how I can help."
+
+  return (
+    <div style={{ maxWidth: 720, margin: '0 auto' }}>
+      <div style={{ marginBottom: 20 }}>
+        <h1 style={{ fontSize: 22, fontWeight: 700, marginBottom: 4 }}>Voice Settings</h1>
+        <p style={{ color: 'var(--text-secondary)', fontSize: 13 }}>Configure text-to-speech, speech recognition, and wake word</p>
+      </div>
+
+      {(!ttsOk || !sttOk) && (
+        <Card style={{ marginBottom: 16, background: 'var(--yellow-bg)', border: '1px solid var(--yellow)' }}>
+          <div style={{ fontSize: 12, color: 'var(--yellow)', fontWeight: 600, marginBottom: 4 }}>Browser support</div>
+          <div style={{ fontSize: 13, color: 'var(--text-primary)' }}>
+            {!ttsOk && <>Text-to-speech is not available in this browser. </>}
+            {!sttOk && <>Speech recognition is not available. Chrome, Edge, or Safari give the best results.</>}
+          </div>
+        </Card>
+      )}
+
+      <Card style={{ marginBottom: 16 }}>
+        <SectionHeader title="Voice" subtitle="Choose how the assistant sounds" />
+        <div style={{ display: 'flex', gap: 8, marginBottom: 16 }}>
+          {['female', 'male'].map((g) => (
+            <button
+              key={g}
+              onClick={() => setSettings({ gender: g, voiceName: '' })}
+              style={{
+                flex: 1, padding: '10px 14px',
+                background: settings.gender === g ? 'var(--accent-glow)' : 'var(--bg-tertiary)',
+                border: settings.gender === g ? '1px solid var(--accent)' : '1px solid var(--border-light)',
+                color: settings.gender === g ? 'var(--accent)' : 'var(--text-secondary)',
+                borderRadius: 8, fontSize: 13, fontWeight: 600,
+                textTransform: 'capitalize',
+                transition: 'all 0.15s ease',
+              }}
+            >
+              {g}
+            </button>
+          ))}
+        </div>
+
+        <div>
+          <label style={{ display: 'block', fontSize: 11, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em', fontWeight: 600, marginBottom: 6 }}>
+            Specific voice (overrides gender)
+          </label>
+          <select
+            value={settings.voiceName}
+            onChange={(e) => setSettings({ voiceName: e.target.value })}
+            style={{
+              width: '100%', padding: '10px 12px',
+              background: 'var(--bg-tertiary)', border: '1px solid var(--border)',
+              borderRadius: 8, fontSize: 13, color: 'var(--text-primary)',
+              cursor: 'pointer',
+            }}
+          >
+            <option value="">Auto (based on gender)</option>
+            {englishVoices.length > 0 && (
+              <optgroup label="English">
+                {englishVoices.map((v) => (
+                  <option key={v.name} value={v.name}>{v.name} ({v.lang})</option>
+                ))}
+              </optgroup>
+            )}
+            {otherVoices.length > 0 && (
+              <optgroup label="Other languages">
+                {otherVoices.map((v) => (
+                  <option key={v.name} value={v.name}>{v.name} ({v.lang})</option>
+                ))}
+              </optgroup>
+            )}
+          </select>
+        </div>
+      </Card>
+
+      <Card style={{ marginBottom: 16 }}>
+        <SectionHeader title="Speech" subtitle="Tune playback to your preference" />
+        <SliderRow
+          label="Speed"
+          value={settings.rate} min={0.8} max={1.5} step={0.05}
+          display={`${settings.rate.toFixed(2)}x`}
+          onChange={(v) => setSettings({ rate: v })}
+        />
+        <SliderRow
+          label="Pitch"
+          value={settings.pitch} min={0} max={2} step={0.1}
+          display={settings.pitch.toFixed(1)}
+          onChange={(v) => setSettings({ pitch: v })}
+        />
+        <SliderRow
+          label="Volume"
+          value={settings.volume} min={0} max={1} step={0.05}
+          display={`${Math.round(settings.volume * 100)}%`}
+          onChange={(v) => setSettings({ volume: v })}
+        />
+        <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
+          <button
+            onClick={() => isSpeaking ? stopSpeaking() : speak(testPhrase)}
+            disabled={!ttsOk}
+            style={{
+              padding: '10px 16px',
+              background: isSpeaking ? 'var(--red-bg)' : 'linear-gradient(135deg, var(--accent), #0099cc)',
+              color: isSpeaking ? 'var(--red)' : '#000',
+              border: isSpeaking ? '1px solid var(--red)' : 'none',
+              borderRadius: 8, fontWeight: 600, fontSize: 13,
+              display: 'flex', alignItems: 'center', gap: 8,
+              opacity: ttsOk ? 1 : 0.5,
+            }}
+          >
+            <Icon name={isSpeaking ? 'stop' : 'play'} size={12} />
+            {isSpeaking ? 'Stop' : 'Test voice'}
+          </button>
+        </div>
+      </Card>
+
+      <Card style={{ marginBottom: 16 }}>
+        <SectionHeader title="Auto-read" subtitle="Read assistant replies aloud when received" />
+        <ToggleRow
+          label="Read replies automatically"
+          checked={settings.autoRead}
+          onChange={(v) => setSettings({ autoRead: v })}
+        />
+      </Card>
+
+      <Card>
+        <SectionHeader
+          title="Wake Word"
+          subtitle="Always-listening mode (best effort — browser support varies)"
+        />
+        <ToggleRow
+          label="Enable wake word"
+          checked={settings.wakeWordEnabled}
+          onChange={(v) => setSettings({ wakeWordEnabled: v })}
+          disabled={!sttOk}
+        />
+        <div style={{ marginTop: 14 }}>
+          <label style={{ display: 'block', fontSize: 11, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em', fontWeight: 600, marginBottom: 6 }}>
+            Wake phrase
+          </label>
+          <input
+            value={settings.wakeWord}
+            onChange={(e) => setSettings({ wakeWord: e.target.value })}
+            placeholder="hey atlas"
+            disabled={!sttOk}
+            style={{
+              width: '100%', padding: '10px 12px',
+              background: 'var(--bg-tertiary)', border: '1px solid var(--border)',
+              borderRadius: 8, fontSize: 13, color: 'var(--text-primary)',
+              opacity: sttOk ? 1 : 0.5,
+            }}
+          />
+          <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 8, lineHeight: 1.5 }}>
+            When enabled, the app listens continuously and switches to the assistant when it hears your phrase. Continuous recognition is restarted as needed, but reliability depends on the browser and your microphone. Requires microphone permission.
+          </div>
+        </div>
+      </Card>
+    </div>
+  )
+}
+
+function SliderRow({ label, value, min, max, step, display, onChange }) {
+  return (
+    <div style={{ marginBottom: 14 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+        <span style={{ fontSize: 12, color: 'var(--text-secondary)', fontWeight: 600 }}>{label}</span>
+        <span style={{ fontSize: 12, color: 'var(--accent)', fontFeatureSettings: '"tnum"', fontVariantNumeric: 'tabular-nums', fontWeight: 600 }}>{display}</span>
+      </div>
+      <input
+        type="range"
+        min={min} max={max} step={step} value={value}
+        onChange={(e) => onChange(parseFloat(e.target.value))}
+        style={{ width: '100%', accentColor: 'var(--accent)' }}
+      />
+    </div>
+  )
+}
+
+function ToggleRow({ label, checked, onChange, disabled }) {
+  return (
+    <label style={{
+      display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+      cursor: disabled ? 'not-allowed' : 'pointer', opacity: disabled ? 0.5 : 1,
+    }}>
+      <span style={{ fontSize: 13, color: 'var(--text-primary)' }}>{label}</span>
+      <button
+        onClick={() => !disabled && onChange(!checked)}
+        disabled={disabled}
+        style={{
+          width: 40, height: 22, borderRadius: 11,
+          background: checked ? 'var(--accent)' : 'var(--bg-hover)',
+          position: 'relative',
+          transition: 'background 0.15s ease',
+          cursor: disabled ? 'not-allowed' : 'pointer',
+        }}
+      >
+        <span style={{
+          position: 'absolute', top: 2, left: checked ? 20 : 2,
+          width: 18, height: 18, borderRadius: '50%',
+          background: '#fff',
+          transition: 'left 0.15s ease',
+        }} />
+      </button>
+    </label>
+  )
+}
+
+function AppShell() {
   const [apiKey, setApiKey] = useState(() => localStorage.getItem('anthropic_api_key') || '')
   const [activeTab, setActiveTab] = useState('briefing')
   const [mobileOpen, setMobileOpen] = useState(false)
   const [windowWidth, setWindowWidth] = useState(window.innerWidth)
+  const [wakePending, setWakePending] = useState(false)
 
   useEffect(() => {
     const onResize = () => setWindowWidth(window.innerWidth)
@@ -1379,45 +1807,82 @@ export default function App() {
     }
   }
 
+  const handleWakeWord = useCallback(() => {
+    setActiveTab('chat')
+    setWakePending(true)
+  }, [])
+
+  const handleWakeHandled = useCallback(() => setWakePending(false), [])
+
   if (!apiKey) return <APIKeySetup onSave={saveKey} />
 
   const isMobile = windowWidth <= 768
 
   return (
-    <div style={{
-      display: 'flex', width: '100%', height: '100%',
-      background: 'var(--bg-primary)',
-    }}>
-      <Sidebar
-        activeTab={activeTab}
-        setActiveTab={setActiveTab}
-        onResetKey={resetKey}
-        mobileOpen={mobileOpen}
-        setMobileOpen={setMobileOpen}
-      />
-      <main style={{
-        flex: 1, height: '100%', overflow: 'auto',
-        padding: isMobile ? '60px 16px 20px' : '24px 28px',
-        position: 'relative',
+    <VoiceProvider onWakeWord={handleWakeWord}>
+      <div style={{
+        display: 'flex', width: '100%', height: '100%',
+        background: 'var(--bg-primary)',
       }}>
-        {isMobile && (
-          <button
-            onClick={() => setMobileOpen(true)}
-            style={{
-              position: 'fixed', top: 14, left: 14, zIndex: 90,
-              padding: 8, background: 'var(--bg-card)',
-              border: '1px solid var(--border)', borderRadius: 8,
-            }}
-          >
-            <Icon name="menu" size={18} />
-          </button>
-        )}
-        {activeTab === 'briefing' && <DailyBriefing apiKey={apiKey} />}
-        {activeTab === 'chat' && <ChatAssistant apiKey={apiKey} />}
-        {activeTab === 'market' && <MarketWatch apiKey={apiKey} />}
-        {activeTab === 'news' && <NewsFeed apiKey={apiKey} />}
-        {activeTab === 'reminders' && <Reminders apiKey={apiKey} />}
-      </main>
+        <Sidebar
+          activeTab={activeTab}
+          setActiveTab={setActiveTab}
+          onResetKey={resetKey}
+          mobileOpen={mobileOpen}
+          setMobileOpen={setMobileOpen}
+        />
+        <main style={{
+          flex: 1, height: '100%', overflow: 'auto',
+          padding: isMobile ? '60px 16px 20px' : '24px 28px',
+          position: 'relative',
+        }}>
+          {isMobile && (
+            <button
+              onClick={() => setMobileOpen(true)}
+              style={{
+                position: 'fixed', top: 14, left: 14, zIndex: 90,
+                padding: 8, background: 'var(--bg-card)',
+                border: '1px solid var(--border)', borderRadius: 8,
+              }}
+            >
+              <Icon name="menu" size={18} />
+            </button>
+          )}
+          <WakeWordBadge />
+          {activeTab === 'briefing' && <DailyBriefing apiKey={apiKey} />}
+          {activeTab === 'chat' && <ChatAssistant apiKey={apiKey} wakePending={wakePending} onWakeHandled={handleWakeHandled} />}
+          {activeTab === 'market' && <MarketWatch apiKey={apiKey} />}
+          {activeTab === 'news' && <NewsFeed apiKey={apiKey} />}
+          {activeTab === 'reminders' && <Reminders apiKey={apiKey} />}
+          {activeTab === 'voice' && <VoiceSettings />}
+        </main>
+      </div>
+    </VoiceProvider>
+  )
+}
+
+function WakeWordBadge() {
+  const { settings } = useVoice()
+  if (!settings.wakeWordEnabled) return null
+  return (
+    <div style={{
+      position: 'fixed', bottom: 16, right: 16, zIndex: 50,
+      padding: '8px 12px', borderRadius: 20,
+      background: 'var(--bg-card)', border: '1px solid var(--accent)',
+      fontSize: 11, color: 'var(--accent)',
+      display: 'flex', alignItems: 'center', gap: 8, fontWeight: 600,
+      boxShadow: '0 4px 12px rgba(0,0,0,0.3)',
+    }}>
+      <span style={{
+        width: 8, height: 8, borderRadius: '50%',
+        background: 'var(--accent)',
+        animation: 'pulse 1.5s ease-in-out infinite',
+      }} />
+      Listening for "{settings.wakeWord}"
     </div>
   )
+}
+
+export default function App() {
+  return <AppShell />
 }
